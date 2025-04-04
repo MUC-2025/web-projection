@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Projective Transformation of a Webpage Demo</title>
+  <style>
+    /* Basic reset */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #ddd;
+    }
+    /* The container wrapping all page content */
+    #page-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #f0f0f0;
+      transition: transform 0.5s ease;
+      /* We use top-left as the transform origin */
+      transform-origin: top left;
+    }
+    /* A semi-transparent overlay to capture click events */
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      z-index: 10;
+    }
+    /* Markers that show the clicked points */
+    .marker {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: red;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 20;
+    }
+    /* A fixed control panel for instructions and buttons */
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      z-index: 30;
+    }
+  </style>
+</head>
+<body>
+  <!-- The container holding all page content -->
+  <div id="page-container">
+    <!-- Demo page content -->
+    <h1 style="text-align:center;">Projective Transformation Demo</h1>
+    <p style="text-align:center;">This is a demo of a full-page transformation using CSS 3D transforms.</p>
+    <p style="text-align:center;">Click anywhere on the page (the transparent overlay) to define four destination points.</p>
+    <p style="text-align:center;">After selecting 4 points, click the "Apply Transformation" button.</p>
+    <!-- Overlay for capturing user clicks -->
+    <div id="overlay"></div>
+  </div>
+  
+  <!-- Control panel -->
+  <div id="controls">
+    <button id="transformBtn">Apply Transformation</button>
+    <button id="resetBtn">Reset</button>
+    <div id="log">Please click 4 points on the page.</div>
+  </div>
+  
+  <script>
+    // Get references to DOM elements.
+    const container = document.getElementById('page-container');
+    const overlay = document.getElementById('overlay');
+    const transformBtn = document.getElementById('transformBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const logDiv = document.getElementById('log');
+    
+    // Get container dimensions; our source corners are the container's four corners.
+    let containerRect = container.getBoundingClientRect();
+    let width = containerRect.width;
+    let height = containerRect.height;
+    const srcCorners = [
+      [0, 0],           // top-left
+      [width, 0],       // top-right
+      [width, height],  // bottom-right
+      [0, height]       // bottom-left
+    ];
+    
+    // Destination corners and markers.
+    let dstCorners = [];
+    let markers = [];
+    
+    // Create a marker element to show where the user clicked.
+    function addMarker(x, y) {
+      const marker = document.createElement('div');
+      marker.className = 'marker';
+      marker.style.left = x + 'px';
+      marker.style.top = y + 'px';
+      overlay.appendChild(marker);
+      markers.push(marker);
+    }
+    
+    // Clear markers and reset destination points.
+    function clearMarkers() {
+      markers.forEach(marker => marker.remove());
+      markers = [];
+      dstCorners = [];
+      logDiv.textContent = 'Please click 4 points on the page.';
+    }
+    
+    // Listen for clicks on the overlay to capture destination points.
+    overlay.addEventListener('click', function(e) {
+      // Only record up to 4 points.
+      if (dstCorners.length >= 4) {
+        logDiv.textContent = 'Already have 4 points. Click "Apply Transformation" or "Reset" to start over.';
+        return;
+      }
+      // Calculate click position relative to the container.
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      dstCorners.push([x, y]);
+      addMarker(x, y);
+      if (dstCorners.length < 4) {
+        logDiv.textContent = `Point ${dstCorners.length} recorded. ${4 - dstCorners.length} more to go...`;
+      } else {
+        logDiv.textContent = 'All 4 points recorded. Click "Apply Transformation".';
+      }
+    });
+    
+    // Compute a 3x3 projective transformation matrix given source and destination corners.
+    function getProjectiveTransformMatrix(src, dst) {
+      const A = [];
+      const B = [];
+      for (let i = 0; i < 4; i++) {
+        const xs = src[i][0], ys = src[i][1];
+        const xd = dst[i][0], yd = dst[i][1];
+        A.push([ xs, ys, 1, 0, 0, 0, -xd * xs, -xd * ys ]);
+        B.push(xd);
+        A.push([ 0, 0, 0, xs, ys, 1, -yd * xs, -yd * ys ]);
+        B.push(yd);
+      }
+      const h = numericSolve(A, B);
+      h.push(1);
+      return h; // h is an array of 9 numbers.
+    }
+    
+    // A simple Gaussian elimination solver.
+    function numericSolve(A, B) {
+      const n = A.length;
+      const m = A[0].length;
+      const M = [];
+      for (let i = 0; i < n; i++) {
+        M[i] = A[i].slice();
+        M[i].push(B[i]);
+      }
+      for (let i = 0; i < m; i++) {
+        // Find pivot row.
+        let maxRow = i;
+        for (let r = i + 1; r < n; r++) {
+          if (Math.abs(M[r][i]) > Math.abs(M[maxRow][i])) {
+            maxRow = r;
+          }
+        }
+        // Swap rows.
+        [M[i], M[maxRow]] = [M[maxRow], M[i]];
+        for (let r = i + 1; r < n; r++) {
+          const factor = M[r][i] / M[i][i];
+          for (let c = i; c < m + 1; c++) {
+            M[r][c] -= M[i][c] * factor;
+          }
+        }
+      }
+      const x = new Array(m);
+      for (let i = m - 1; i >= 0; i--) {
+        let sum = M[i][m];
+        for (let c = i + 1; c < m; c++) {
+          sum -= M[i][c] * x[c];
+        }
+        x[i] = sum / M[i][i];
+      }
+      return x;
+    }
+    
+    // Convert the 3x3 transformation matrix to a CSS matrix3d string.
+    function convertToCSSMatrix(h) {
+      // Our 3x3 matrix h is:
+      // [ a, b, c,
+      //   d, e, f,
+      //   g, h, i ]
+      // The corresponding CSS 4x4 matrix (in column-major order) is:
+      // matrix3d(a, d, 0, g,
+      //          b, e, 0, h,
+      //          0,  0, 1, 0,
+      //          c, f, 0, i)
+      return `matrix3d(${h[0]}, ${h[3]}, 0, ${h[6]}, ` +
+             `${h[1]}, ${h[4]}, 0, ${h[7]}, ` +
+             `0, 0, 1, 0, ` +
+             `${h[2]}, ${h[5]}, 0, ${h[8]})`;
+    }
+    
+    // When the user clicks "Apply Transformation", compute and apply the transform.
+    transformBtn.addEventListener('click', function() {
+      if (dstCorners.length < 4) {
+        logDiv.textContent = 'Please click 4 points first.';
+        return;
+      }
+      // Compute the projective transformation matrix.
+      const H = getProjectiveTransformMatrix(srcCorners, dstCorners);
+      // Convert to a CSS 3D transform.
+      const cssMatrix = convertToCSSMatrix(H);
+      // Apply the transformation to the page container.
+      container.style.transform = cssMatrix;
+      logDiv.textContent = 'Transformation applied!';
+      // Optionally disable further clicks.
+      overlay.style.pointerEvents = 'none';
+    });
+    
+    // Reset the transformation and clear markers.
+    resetBtn.addEventListener('click', function() {
+      container.style.transform = 'none';
+      overlay.style.pointerEvents = 'auto';
+      clearMarkers();
+    });
+  </script>
+</body>
+</html>
